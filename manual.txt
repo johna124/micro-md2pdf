@@ -1,0 +1,98 @@
+===============================================================================
+                            micro-md2pdf - USER MANUAL
+===============================================================================
+
+NAME
+    micro-md2pdf - Ultra-compact, multi-architecture Markdown to PDF converter.
+
+SYNOPSIS
+    ./compile.sh [amd64|arm64|riscv64|all]
+    ./micro-md2pdf-<arch> <input.md> [output.pdf]
+
+DESCRIPTION
+    md2pdf is a high-performance Markdown-to-PDF engine written in C99.
+    It compiles into a fully static ~1.5 MB binary (via musl libc) with zero
+    external runtime dependencies, enabling instant execution on any Linux
+    distribution without requiring Python, Node.js, or LaTeX.
+
+TOOL COMPARISON & PERFORMANCE BENCHMARKS
+    ---------------------------------------------------------------------------
+    Metric / Feature      md2pdf        WeasyPrint       Pandoc + LaTeX
+    ---------------------------------------------------------------------------
+    Binary Size           ~1.43 MB      ~50+ MB          > 100 MB
+    Implementation        Pure C99      Python 3         Haskell
+    Runtime Dependencies  NONE (Static) Python/Cairo/Pango TeX Live / Engines
+    Execution Speed       < 50 ms       ~1.5 - 3.0 s     > 2.0 s
+    Peak RAM Usage        < 10 MB       > 120 MB         > 250 MB
+    TLS Network Stack     MbedTLS 3.6   Python Requests  External curl/wget
+    Target Architectures  amd64/arm64/  Requires Python  Requires TeX binaries
+                          riscv64       environment      per architecture
+    ---------------------------------------------------------------------------
+
+SUPPORTED MARKDOWN SYNTAX
+    - Headings: # through ###### (H1 and H2 render decorative underlines).
+    - Text Styling: *italic*, **bold**, `inline code`.
+    - Emojis: Full color Twemoji rendering natively in the PDF.
+    - Hyperlinks:
+        * Standard: [Text](https://example.com)
+        * Nested Parentheses: [Wiki](https://en.wikipedia.org/wiki/Avida_(software))
+        * Bare Autolinks: https://example.com (strips trailing punctuation)
+    - Lists: Unordered bullet lists (- or *).
+    - Blockquotes: Block level quotes via '>'.
+    - Tables: Dynamic cell layout, auto-wrapping, and dynamic column calculation.
+    - Images & Badges: Local files and remote HTTP/HTTPS image URLs.
+        * Supported Decoders: JPEG, PNG, WebP (libwebp), AVIF (dav1d + libavif).
+        * Smart Badges: shields.io SVGs are auto-converted to PNGs and aligned inline.
+    - Section Breaks: Horizontal rules (---, ***, ___).
+
+KNOWN LIMITATIONS
+    - Limited SVG Support: Generic SVG files are not natively rasterized. (shields.io 
+      badges are supported via automatic PNG fallback).
+    - Font Limitations: Relies strictly on PDF Base-14 fonts (Helvetica, Courier) 
+      to maintain the ~1.43 MB static binary size (no custom TrueType fonts embedded).
+
+COMPILATION & BUILD STRATEGIES
+
+    STRATEGY A: Docker + Alpine Linux ("Spartan Build" - Recommended)
+        - Generates a 100% static binary linked against musl libc (~1.5 MB).
+        - Source-compiled dependencies in build container:
+            * MbedTLS (branch mbedtls-3.6): Lightweight TLS 1.3 implementation.
+              Requires build tools: perl, py3-jsonschema, py3-jinja2.
+            * libwebp: Decoder-only configuration without CLI utilities.
+            * dav1d: 8-bit decoder only (ASM disabled on RISC-V for stability).
+            * libavif: Decoder-only build (AVIF_CODEC_AOM=OFF).
+        - Architectures supported: amd64, arm64, riscv64.
+        - Guarantees reproducible builds via SOURCE_DATE_EPOCH & ZERO_AR_DATE.
+
+    STRATEGY B: Local GCC Fallback
+        - Semi-static build using host compiler (`-static-libgcc`).
+        - Requires host system development libraries:
+            libwebp-dev, libavif-dev, libdav1d-dev, zlib1g-dev, mbedtls-dev.
+
+USAGE EXAMPLES
+    # 1. Compile static binary for x86_64
+    ./compile.sh amd64
+
+    # 2. Compile static binaries for all architectures
+    ./compile.sh all
+
+    # 3. Render document to PDF
+    ./micro-md2pdf-amd64 documentation.md output_report.pdf
+
+    # 4. Auto-generate output filename
+    ./micro-md2pdf-amd64 README.md
+
+TECHNICAL SPECIFICATIONS
+    - Size Optimization: -Os, -fomit-frame-pointer, -ffunction-sections,
+      -fdata-sections, and -Wl,--gc-sections remove unused library symbols.
+    - Architecture Independent: Runs on any Linux kernel of target architecture.
+    - Safe Table Layout: Tables recalculate column ratios relative to maximum
+      printable width to avoid visual page clipping.
+    - Inline Image Layout: Multiple images (like badges) are laid out horizontally
+      and wrapped gracefully across lines.
+
+LICENSE
+Licensed under the GNU General Public License v3.0 (GPLv3).
+===============================================================================
+                          (c) 2026 - micro-md2pdf Project
+===============================================================================
