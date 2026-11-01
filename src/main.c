@@ -5,21 +5,6 @@
  * distribution without requiring Python, Node.js, or LaTeX
  *
  * Copyright (C) 2026  John (johna124)
- *
- * This program is free software: you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation, either version 3 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <https://www.gnu.org/licenses/>.
- *
- * Source, issues, contact: https://github.com/johna124
  */
 
 #include "pdf_core.h"
@@ -173,7 +158,7 @@ static char *to_winansi(const char *s) {
             if (cp == 0x200B || cp == 0x200C || cp == 0x00AD) continue;
             if (cp == '\t') { out[o++] = ' '; continue; }
             if (is_emoji_cp(cp)) {
-                char tmp[4];
+                char tmp[8]; // SANEADO: De 4 a 8 bytes de seguridad para alineación de bits
                 int tl = cp_to_utf8(cp, tmp);
                 memcpy(out + o, tmp, (size_t)tl);
                 o += (size_t)tl;
@@ -181,7 +166,7 @@ static char *to_winansi(const char *s) {
                     size_t peek_i = i;
                     int next_cp = utf8_dec(s, n, &peek_i);
                     if (is_emoji_modifier(next_cp)) {
-                        char tmp2[4];
+                        char tmp2[8]; // SANEADO: De 4 a 8 bytes
                         int tl2 = cp_to_utf8(next_cp, tmp2);
                         memcpy(out + o, tmp2, (size_t)tl2);
                         o += (size_t)tl2;
@@ -272,9 +257,13 @@ int main(int argc, char **argv) {
     int rn = 0, rc = 0;
     char *linebuf = (char *)malloc(flen + 2);
     char *p = s0;
-    int prev_hb = 0;
+
+char *ln = NULL; 
+int prev_hb = 0;
 
     while (*p) {
+        if (ln) { free(ln); ln = NULL; }
+
         char *e = strchr(p, '\n');
         size_t ll = e ? (size_t)(e - p) : strlen(p);
         memcpy(linebuf, p, ll);
@@ -285,7 +274,7 @@ int main(int argc, char **argv) {
         size_t L = strlen(linebuf);
         if (L && linebuf[L - 1] == '\r') linebuf[L - 1] = 0;
 
-        char *ln = to_winansi(linebuf);
+        ln = to_winansi(linebuf);
         size_t ln_len = strlen(ln);
         int hard_break = (ln_len >= 2 &&
                           ln[ln_len - 1] == ' ' &&
@@ -295,8 +284,8 @@ int main(int argc, char **argv) {
             if (in_code) {
                 if (!strncmp(ln, "```", 3)) {
                     code_block(&doc, &code);
-                    code.n = 0;
-                    if (code.d) code.d[0] = 0;
+                    if (code.d) free(code.d); 
+                    binit(&code);           
                     in_code = 0;
                 } else {
                     bputs(&code, ln);
@@ -359,44 +348,44 @@ int main(int argc, char **argv) {
             }
 
             /* ---- Imagen de bloque: la línea contiene SOLO una imagen ---- */
-{
-    char iurl[1024];
-    int wpct = 0, wpx = 0;
-    int is_block = 0;
+            {
+                char iurl[1024];
+                int wpct = 0, wpx = 0;
+                int is_block = 0;
 
-    if (t[0] == '!' && t[1] == '[') {
-        const char *cl = strchr(t + 2, ']');
-        if (cl && cl[1] == '(') {
-            int depth = 1;
-            const char *q = cl + 2;
-            while (*q && depth > 0) {
-                if (*q == '(') depth++;
-                else if (*q == ')') depth--;
-                if (depth > 0) q++;
-            }
-            if (depth == 0) {
-                q++;
-                while (*q == ' ' || *q == '\t') q++;
-                if (*q == 0 && image_url(t, iurl, sizeof iurl, &wpct, &wpx))
-                    is_block = 1;
-            }
-        }
-    } else if (starts_with_html_img(t)) {
-        const char *gt = strchr(t, '>');
-        if (gt) {
-            const char *after = gt + 1;
-            while (*after == ' ' || *after == '\t') after++;
-            if (*after == 0 && image_url(t, iurl, sizeof iurl, &wpct, &wpx))
-                is_block = 1;
-        }
-    }
+                if (t[0] == '!' && t[1] == '[') {
+                    const char *cl = strchr(t + 2, ']');
+                    if (cl && cl[1] == '(') {
+                        int depth = 1;
+                        const char *q = cl + 2;
+                        while (*q && depth > 0) {
+                            if (*q == '(') depth++;
+                            else if (*q == ')') depth--;
+                            if (depth > 0) q++;
+                        }
+                        if (depth == 0) {
+                            q++;
+                            while (*q == ' ' || *q == '\t') q++;
+                            if (*q == 0 && image_url(t, iurl, sizeof iurl, &wpct, &wpx))
+                                is_block = 1;
+                        }
+                    }
+                } else if (starts_with_html_img(t)) {
+                    const char *gt = strchr(t, '>');
+                    if (gt) {
+                        const char *after = gt + 1;
+                        while (*after == ' ' || *after == '\t') after++;
+                        if (*after == 0 && image_url(t, iurl, sizeof iurl, &wpct, &wpx))
+                            is_block = 1;
+                    }
+                }
 
-    if (is_block) {
-        flush_para(&doc, &para, &have_para);
-        render_image(&doc, iurl, wpct, wpx);   /* ← tamaño completo */
-        break;
-    }
-}
+                if (is_block) {
+                    flush_para(&doc, &para, &have_para);
+                    render_image(&doc, iurl, wpct, wpx);
+                    break;
+                }
+            }
 
             {
                 char iurl[1024];
@@ -478,13 +467,13 @@ int main(int argc, char **argv) {
             prev_hb    = hard_break;
             break;
         }
-
-        free(ln);
     }
 
-    if (in_code) code_block(&doc, &code);
+    if (ln) { free(ln); ln = NULL; }
+
+    if (in_code) { code_block(&doc, &code); if (code.d) free(code.d); }
     if (rn) { render_table(&doc, rows, rn); free_rows(rows, rn); }
-    if (have_para) para_text(&doc, para.d);
+    if (have_para) { para_text(&doc, para.d); }
 
     int np = write_pdf(&doc, argv[2]);
     if (np < 0) { fprintf(stderr, "error: I cannot write %s\n", argv[2]); return 1; }
@@ -492,8 +481,8 @@ int main(int argc, char **argv) {
 
     free_images();
     free(para.d);
-    free(code.d);
     free(linebuf);
     free(src);
     return 0;
 }
+

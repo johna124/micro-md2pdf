@@ -22,6 +22,7 @@
  * Source, issues, contact: https://github.com/johna124
  */
 
+#include <zlib.h> 
 #include "pdf_core.h"
 
 Img *imgs = NULL;
@@ -179,20 +180,52 @@ void add_link(Doc *d, double x1, double y1, double x2, double y2, const char *ur
 static long wbuf(FILE *f, const void *s, size_t n) { return (long)fwrite(s, 1, n, f); }
 static long wstr(FILE *f, const char *s) { return wbuf(f, s, strlen(s)); }
 
-int write_pdf(Doc *d, const char *path) {
-    for (int i = 0; i < d->n; i++) {
-        Buf *b = d->pg[i];
-        char tmp[48];
-        snprintf(tmp, sizeof tmp, "P\341gina %d de %d", i + 1, d->n);
-        double w = textw(tmp, 8, 0);
-        Buf fb = {0};
-        bputc(&fb, '(');
-        esc_pdf(&fb, tmp);
-        bputc(&fb, ')');
-        bprintf(b, "0.45 0.45 0.45 rg BT /F1 8 Tf %.2f 34 Td %s Tj ET 0 0 0 rg\n",
-                (PW - w) / 2.0, fb.d ? fb.d : "()");
-        free(fb.d);
+    
+
+// =========================================================================
+// FUNCIÓN AUXILIAR DE COMPRESIÓN DE TEXTO A NIVEL 9
+// =========================================================================
+static Buf compress_buf(Buf *in) {
+    Buf out;
+    binit(&out);
+    if (in->n == 0) return out;
+
+    uLongf dest_len = compressBound(in->n);
+    bneed(&out, dest_len);
+
+    z_stream strm;
+    strm.zalloc = Z_NULL;
+    strm.zfree = Z_NULL;
+    strm.opaque = Z_NULL;
+    strm.avail_in = (uInt)in->n;
+    strm.next_in = (Bytef *)in->d;
+    strm.avail_out = (uInt)dest_len;
+    strm.next_out = (Bytef *)out.d;
+
+    if (deflateInit2(&strm, 9, Z_DEFLATED, 15, 8, Z_DEFAULT_STRATEGY) != Z_OK) {
+        goto fallback;
     }
+
+    int ret = deflate(&strm, Z_FINISH);
+    deflateEnd(&strm);
+
+    if (ret == Z_STREAM_END) {
+        out.n = strm.total_out;
+        out.d[out.n] = 0;
+        return out;
+    }
+
+fallback:
+    free(out.d);
+    binit(&out);
+    bput(&out, in->d, in->n);
+    return out;
+}
+
+// =========================================================================
+// FUNCIÓN PRINCIPAL DE ESCRITURA PDF OPTIMIZADA
+// =========================================================================
+int write_pdf(Doc *d, const char *path) {
 
     FILE *f = fopen(path, "wb");
     if (!f) return -1;
@@ -229,25 +262,25 @@ int write_pdf(Doc *d, const char *path) {
                     im->cs == 0 ? "/DeviceGray" : "/DeviceRGB",
                     im->len);
             wbuf(f, im->data, im->len);
-     } else if (im->flate) {
-        int smask_ref = -1;
-        if (im->smask_id >= 0 && im->smask_id < ni) {
-            smask_ref = 7 + im->smask_id;
-        }
-        if (smask_ref >= 0) {
-            fprintf(f, "%d 0 obj\n<< /Type /XObject /Subtype /Image /Width %d /Height %d "
-                    "/ColorSpace %s /BitsPerComponent 8 /Filter /FlateDecode /Length %zu /SMask %d 0 R >>\nstream\n",
-                    7 + k, im->rw, im->rh,
-                    im->cs == 0 ? "/DeviceGray" : "/DeviceRGB",
-                    im->zlen, smask_ref);
-        } else {
-            fprintf(f, "%d 0 obj\n<< /Type /XObject /Subtype /Image /Width %d /Height %d "
-                    "/ColorSpace %s /BitsPerComponent 8 /Filter /FlateDecode /Length %zu >>\nstream\n",
-                    7 + k, im->rw, im->rh,
-                    im->cs == 0 ? "/DeviceGray" : "/DeviceRGB",
-                    im->zlen);
-        }
-        wbuf(f, im->zdata, im->zlen);
+        } else if (im->flate) {
+            int smask_ref = -1;
+            if (im->smask_id >= 0 && im->smask_id < ni) {
+                smask_ref = 7 + im->smask_id;
+            }
+            if (smask_ref >= 0) {
+                fprintf(f, "%d 0 obj\n<< /Type /XObject /Subtype /Image /Width %d /Height %d "
+                        "/ColorSpace %s /BitsPerComponent 8 /Filter /FlateDecode /Length %zu /SMask %d 0 R >>\nstream\n",
+                        7 + k, im->rw, im->rh,
+                        im->cs == 0 ? "/DeviceGray" : "/DeviceRGB",
+                        im->zlen, smask_ref);
+            } else {
+                fprintf(f, "%d 0 obj\n<< /Type /XObject /Subtype /Image /Width %d /Height %d "
+                        "/ColorSpace %s /BitsPerComponent 8 /Filter /FlateDecode /Length %zu >>\nstream\n",
+                        7 + k, im->rw, im->rh,
+                        im->cs == 0 ? "/DeviceGray" : "/DeviceRGB",
+                        im->zlen);
+            }
+            wbuf(f, im->zdata, im->zlen);
         } else {
             fprintf(f, "%d 0 obj\n<< /Type /XObject /Subtype /Image /Width %d /Height %d "
                     "/ColorSpace %s /BitsPerComponent 8 /Length %zu >>\nstream\n",
@@ -259,14 +292,24 @@ int write_pdf(Doc *d, const char *path) {
         wstr(f, "\nendstream\nendobj\n");
     }
 
+    // =========================================================================
+    // SECCIÓN MODIFICADA: BUCLE DE PÁGINAS CON COMPRESIÓN FLATE EN TEXTO
+    // =========================================================================
     for (int i = 0; i < np; i++) {
         int cnum = base + 2 * i, pnum = base + 2 * i + 1;
         Buf *b = d->pg[i];
 
+        // Comprimimos el buffer de texto de la página actual a nivel 9
+        Buf compressed = compress_buf(b);
+
         off[cnum] = ftell(f);
-        fprintf(f, "%d 0 obj\n<< /Length %zu >>\nstream\n", cnum, b->n);
-        wbuf(f, b->d, b->n);
+        // Añadimos el filtro /FlateDecode e inyectamos la longitud del flujo comprimido
+        fprintf(f, "%d 0 obj\n<< /Filter /FlateDecode /Length %zu >>\nstream\n", cnum, compressed.n);
+        wbuf(f, compressed.d, compressed.n);
         wstr(f, "\nendstream\nendobj\n");
+
+        // Liberamos la memoria del buffer comprimido intermedio
+        free(compressed.d);
 
         Buf xo = {0};
         int any = 0;
@@ -325,3 +368,4 @@ int write_pdf(Doc *d, const char *path) {
     free(kids.d);
     return np;
 }
+

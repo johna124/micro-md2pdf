@@ -1047,8 +1047,13 @@ int is_table_line(const char *s) {
 void flush_para(Doc *d, Buf *para, int *have) {
     if (!*have) return;
     para_text(d, para->d);
-    *have = 0; para->n = 0; if (para->d) para->d[0] = 0;
+    *have = 0;
+    if (para->d) {
+        free(para->d); 
+    }
+    binit(para);  
 }
+
 
 static int ci_match(const char *a, const char *b, size_t n) {
     for (size_t i = 0; i < n; i++) {

@@ -987,7 +987,7 @@ int emoji_atlas_build(const char *md_text) {
     g_atlas_id = -2;
     g_atlas_alpha_id = -2;
     scan_emojis(md_text);
-    fprintf(stderr, "[EMOJI] %d secuencias únicas detectadas en el MD\n", g_emojis_n);
+    fprintf(stderr, "[EMOJI] %d unique sequences detected in the MD\n", g_emojis_n);
     for (int dbg = 0; dbg < g_emojis_n; dbg++) {
         fprintf(stderr, "  [%d] len=%d seq=", dbg, g_emojis[dbg].len);
         for (int k = 0; k < g_emojis[dbg].len; k++)
